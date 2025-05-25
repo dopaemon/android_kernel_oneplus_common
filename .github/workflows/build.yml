@@ -1,0 +1,264 @@
+name: DoraCore Kernel Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      KERNEL_BRANCH:
+        description: 'DoraCore Branch'
+        required: true
+        default: 'Rebase'
+        type: choice
+        options:
+        - Rebase
+      KERNEL_GIT:
+        description: 'Kernel Source Code'
+        required: true
+        default: 'https://github.com/dopaemon/android_kernel_oneplus_common.git'
+      BUILD_DEVICE:
+        description: 'Device Target'
+        required: true
+        default: 'ace5'
+        type: choice
+        options:
+        - ace5
+        - all
+      MANIFEST_GIT:
+        description: 'Kernel Manifest Git'
+        required: true
+        default: 'https://github.com/dopaemon/android_kernel_oneplus_common.git'
+      BUILD_TARGET:
+        description: 'Specify your Build Target'
+        required: true
+        default: 'KSU'
+        type: choice
+        options:
+        - NonKSU
+        - KSU
+        - Both
+      ANYKERNEL_GIT:
+        description: 'AnyKernel3 Git'
+        required: true
+        default: 'https://github.com/dopaemon/Anykernel3.git'
+      ANYKERNEL_BRANCH:
+        description: 'AnyKernel3 Branch'
+        required: true
+        default: 'master'
+      RELEASE:
+        description: 'Status Release'
+        required: true
+        default: 'draft'
+        type: choice
+        options:
+        - draft
+        - prerelease
+        - release
+
+jobs:
+  set-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        shell: bash
+        env:
+          BUILD_DEVICE: ${{ github.event.inputs.BUILD_DEVICE }}
+        run: |
+          if [ "$BUILD_DEVICE" = "ace5" ]; then
+            matrix='["ace5"]'
+          elif [ "$BUILD_DEVICE" = "all" ]; then
+            matrix='["ace5"]'
+          fi
+
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  create_release:
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.set-tag.outputs.tag }}
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    permissions:
+      contents: write
+      discussions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set tag as timestamp
+        id: set-tag
+        run: echo "tag=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.set-tag.outputs.tag }}
+          name: DoraCore Build ${{ steps.set-tag.outputs.tag }}
+          draft: ${{ github.event.inputs.RELEASE == 'draft' }}
+          prerelease: ${{ github.event.inputs.RELEASE == 'prerelease' }}
+          body: |
+            Build: DoraCore Kernel For OnePlus SM8650
+            Linux: Linux 6.1.y
+            Type: GKI
+            Developer: @dopaemon
+            Credits:
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: [create_release, set-matrix]
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        device: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    permissions:
+      contents: write
+      discussions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+
+      - uses: actions/setup-python@main
+        with:
+          python-version: "3.x"
+
+      - name: Build Environment
+        run: |
+          echo "BUILD_DATE=$(TZ=Asia/Ho_Chi_Minh date +'%Y-%m%d-%H%M')" >> $GITHUB_ENV
+          cd $GITHUB_WORKSPACE
+          sudo apt-get update
+          sudo apt-get install -y repo git curl patch lld
+          sudo bash -c "echo 'deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main' > /etc/apt/sources.list.d/llvm.list"
+          sudo bash -c "echo 'deb-src http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main' >> /etc/apt/sources.list.d/llvm.list"
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y clang-19 lld-19 llvm-19
+
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+
+          mkdir -p $GITHUB_WORKSPACE/android-kernel && cd $GITHUB_WORKSPACE/android-kernel
+
+          repo init \
+            -u https://github.com/dopaemon/android_kernel_oneplus_common.git \
+            -b manifest \
+            --depth=1 \
+            --git-lfs
+          repo sync -c --no-clone-bundle --optimized-fetch --prune --force-sync -j$(nproc --all)
+          rm -rf .git .github .repo common
+
+          cd $GITHUB_WORKSPACE
+
+          git clone -b ${{ github.event.inputs.ANYKERNEL_BRANCH }} --depth=1 --single-branch ${{ github.event.inputs.ANYKERNEL_GIT }} ./AnyKernel3
+          rm -rf ./AnyKernel3/.git
+
+      - name: Build Selected Devices KSU
+        if: github.event.inputs.BUILD_TARGET == 'KSU' || github.event.inputs.BUILD_TARGET == 'Both'
+        run: |
+          set -e
+          DEVICE="${{ matrix.device }}"
+
+          export OLD_DIR="$GITHUB_WORKSPACE"
+
+          export CC="clang"
+          export CLANG_TRIPLE="aarch64-linux-gnu-"
+          export LDFLAGS="-fuse-ld=lld"
+
+          export CPUD="pineapple"
+          export ENABLE_LTO="false"
+          export ENABLE_POLLY="false"
+          export ENABLE_O3="false"
+
+          export ANDROID_VERSION="android14"
+          export KERNEL_VERSION="6.1"
+          export SUSFS_VERSION="1.5.5"
+
+          cd $GITHUB_WORKSPACE/android-kernel
+
+          export KERNEL_WORKSPACE=$(pwd)
+
+          BAZEL_ARGS=""
+          [ "$ENABLE_O3" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-O3 --copt=-Wno-error"
+          [ "$ENABLE_LTO" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-flto --linkopt=-flto"
+          [ "$ENABLE_POLLY" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-mllvm --copt=-polly --copt=-mllvm --copt=-polly-vectorizer=stripmine"
+
+          rm -f "$KERNEL_WORKSPACE/common/android/abi_gki_protected_exports_*" || echo "No protected exports!"
+          rm -f "$KERNEL_WORKSPACE/msm-kernel/android/abi_gki_protected_exports_*" || echo "No protected exports!"
+          sed -i 's/ -dirty//g' "$KERNEL_WORKSPACE/build/kernel/kleaf/workspace_status_stamp.py"
+
+          cd "$KERNEL_WORKSPACE" || exit 1
+          find . -type d > "$OLD_DIR/kernel_directory_structure.txt"
+
+          cd "$KERNEL_WORKSPACE" || exit 1
+          curl -LSs "https://raw.githubusercontent.com/5ec1cff/KernelSU/refs/heads/main/kernel/setup.sh" | bash -
+          cd KernelSU || exit 1
+          git revert -m 1 "$(git log --grep="remove devpts hook" --pretty=format:"%H")" -n
+          KSU_VERSION=$(expr "$(git rev-list --count HEAD)" + 10200)
+          sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
+
+          cd "$OLD_DIR" || exit 1
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "gki-${ANDROID_VERSION}-${KERNEL_VERSION}" --depth 1
+          git clone https://github.com/TanakaLun/kernel_patches4mksu --depth 1
+          cd "$KERNEL_WORKSPACE" || exit 1
+          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
+          cp ../kernel_patches4mksu/mksu/mksu_susfs.patch ./KernelSU/
+          cp ../kernel_patches4mksu/mksu/fix.patch ./KernelSU/
+          cp ../kernel_patches4mksu/mksu/vfs_fix.patch ./KernelSU/
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch ./common/
+          cp -r ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+
+          cd KernelSU || exit 1
+          patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
+          patch -p1 --forward < mksu_susfs.patch || true
+          patch -p1 --forward < fix.patch || true
+          patch -p1 --forward < vfs_fix.patch || true
+          cd ../common || exit 1
+          patch -s -p1 < 50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch || true
+
+          curl -o 001-lz4.patch https://raw.githubusercontent.com/ferstar/kernel_manifest/realme/sm8650/patches/001-lz4.patch
+          patch -p1 < 001-lz4.patch || true
+          curl -o 002-zstd.patch https://raw.githubusercontent.com/ferstar/kernel_manifest/realme/sm8650/patches/002-zstd.patch
+          patch -p1 < 002-zstd.patch || true
+
+          cd "$KERNEL_WORKSPACE" || exit 1
+          rm common/android/abi_gki_protected_exports_*
+
+          export OPLUS_FEATURES="OPLUS_FEATURE_BSP_DRV_INJECT_TEST=1"
+
+          cd "$OLD_DIR" || exit 1
+          ./kernel_platform/build_with_bazel.py -t "${CPUD}" gki \
+              --config=stamp \
+              --linkopt="-fuse-ld=lld" \
+              $BAZEL_ARGS
+
+          KERNEL_VERSION=$(cat "$KERNEL_WORKSPACE/out/msm-kernel-${CPUD}-gki/dist/version.txt" 2>/dev/null || echo "6.1")
+          cp "$KERNEL_WORKSPACE/out/msm-kernel-${CPUD}-gki/dist/Image" $GITHUB_WORKSPACE/AnyKernel3/
+
+          # Make flashable ZIP
+          ZIP_NAME="DoraCore-${DEVICE}-KSU-6.1-A14-${BUILD_DATE}.zip"
+          cd $GITHUB_WORKSPACE/AnyKernel3
+          zip -r9 "$ZIP_NAME" *
+          mv "$ZIP_NAME" $GITHUB_WORKSPACE/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create_release.outputs.tag }}
+          files: DoraCore*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
