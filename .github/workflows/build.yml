@@ -156,7 +156,8 @@ jobs:
 
       - name: Sync Source
         run: |
-          mkdir -p $GITHUB_WORKSPACE/android-kernel && cd $GITHUB_WORKSPACE/android-kernel
+          mkdir -p $GITHUB_WORKSPACE/android-kernel
+          cd $GITHUB_WORKSPACE/android-kernel
 
           repo init \
             -u https://github.com/dopaemon/android_kernel_oneplus_common.git \
@@ -164,7 +165,6 @@ jobs:
             --depth=1 \
             --git-lfs
           repo sync -c --no-clone-bundle --optimized-fetch --prune --force-sync -j$(nproc --all)
-          rm -rf .git .github .repo common
 
           cd $GITHUB_WORKSPACE
 
@@ -174,10 +174,8 @@ jobs:
       - name: Build Selected Devices KSU
         if: github.event.inputs.BUILD_TARGET == 'KSU' || github.event.inputs.BUILD_TARGET == 'Both'
         run: |
-          set -e
+          set -xve
           DEVICE="${{ matrix.device }}"
-
-          export OLD_DIR="$GITHUB_WORKSPACE"
 
           export CC="clang"
           export CLANG_TRIPLE="aarch64-linux-gnu-"
@@ -193,8 +191,8 @@ jobs:
           export SUSFS_VERSION="1.5.5"
 
           cd $GITHUB_WORKSPACE/android-kernel
-
-          export KERNEL_WORKSPACE=$(pwd)
+          export OLD_DIR="$GITHUB_WORKSPACE"
+          export KERNEL_WORKSPACE="$OLD_DIR/kernel_platform"
 
           BAZEL_ARGS=""
           [ "$ENABLE_O3" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-O3 --copt=-Wno-error"
