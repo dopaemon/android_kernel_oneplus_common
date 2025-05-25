@@ -162,8 +162,7 @@ jobs:
             -u https://github.com/dopaemon/android_kernel_oneplus_common.git \
             -b manifest \
             --depth=1 \
-            --git-lfs \
-            --repo-rev=v2.16
+            --git-lfs
           repo sync -c --no-clone-bundle --optimized-fetch --prune --force-sync -j$(nproc --all)
           rm -rf .git .github .repo common
 
