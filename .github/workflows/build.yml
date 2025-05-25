@@ -191,7 +191,7 @@ jobs:
           export SUSFS_VERSION="1.5.5"
 
           cd $GITHUB_WORKSPACE/android-kernel
-          export OLD_DIR="$GITHUB_WORKSPACE"
+          export OLD_DIR="$(pwd)"
           export KERNEL_WORKSPACE="$OLD_DIR/kernel_platform"
 
           BAZEL_ARGS=""
