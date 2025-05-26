@@ -17,15 +17,24 @@ on:
       BUILD_DEVICE:
         description: 'Device Target'
         required: true
-        default: 'ace5'
+        default: 'pineapple'
         type: choice
         options:
-        - ace5
         - all
+        - pineapple
+        - gki
       MANIFEST_GIT:
         description: 'Kernel Manifest Git'
         required: true
         default: 'https://github.com/dopaemon/android_kernel_oneplus_common.git'
+      CLANG_PREBUILT:
+        description: 'Custom Clang Prebuilt Git'
+        required: true
+        default: 'https://gitlab.com/vermouth/android_prebuilts_clang_host_linux-x86_clang-r536225.git'
+      CLANG_BRANCH:
+        description: 'Custom Clang Prebuilt Branch'
+        required: true
+        default: '14.0'
       BUILD_TARGET:
         description: 'Specify your Build Target'
         required: true
@@ -35,6 +44,14 @@ on:
         - NonKSU
         - KSU
         - Both
+      ANYKERNEL_GIT:
+        description: 'AnyKernel3 Git'
+        required: true
+        default: 'https://github.com/dopaemon/Anykernel3.git'
+      ANYKERNEL_BRANCH:
+        description: 'AnyKernel3 Branch'
+        required: true
+        default: 'master'
       RELEASE:
         description: 'Status Release'
         required: true
@@ -56,10 +73,12 @@ jobs:
         env:
           BUILD_DEVICE: ${{ github.event.inputs.BUILD_DEVICE }}
         run: |
-          if [ "$BUILD_DEVICE" = "ace5" ]; then
-            matrix='["ace5"]'
+          if [ "$BUILD_DEVICE" = "pineapple" ]; then
+            matrix='["pineapple"]'
+          elif [ "$BUILD_DEVICE" = "gki" ]; then
+            matrix='["gki"]'
           elif [ "$BUILD_DEVICE" = "all" ]; then
-            matrix='["ace5"]'
+            matrix='["pineapple", "gki"]'
           fi
 
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
@@ -93,11 +112,11 @@ jobs:
           draft: ${{ github.event.inputs.RELEASE == 'draft' }}
           prerelease: ${{ github.event.inputs.RELEASE == 'prerelease' }}
           body: |
-            Build: DoraCore Kernel For OnePlus SM8650
+            Build: DoraCore Kernel For GKI Linux 6.1.y
             Linux: Linux 6.1.y
             Type: GKI
             Developer: @dopaemon
-            Credits:
+            Credits: @LineageOS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -120,98 +139,81 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-
-      - uses: actions/setup-python@main
-        with:
-          python-version: "3.x"
-
       - name: Build Environment
         run: |
           echo "BUILD_DATE=$(TZ=Asia/Ho_Chi_Minh date +'%Y-%m%d-%H%M')" >> $GITHUB_ENV
           cd $GITHUB_WORKSPACE
           sudo apt-get update
-          sudo apt-get install -y git curl patch lld wget zip
-          sudo bash -c "echo 'deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main' > /etc/apt/sources.list.d/llvm.list"
-          sudo bash -c "echo 'deb-src http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-19 main' >> /etc/apt/sources.list.d/llvm.list"
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo apt-get update
-          sudo apt-get install -y clang-19 lld-19 llvm-19
-
+          sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler rename libelf-dev dwarves wget openjdk-8-jdk
           sudo wget -O /usr/bin/repo http://commondatastorage.googleapis.com/git-repo-downloads/repo
           sudo chmod +x /usr/bin/repo
-
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-
-      - name: Sync Source
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/android-kernel
-          cd $GITHUB_WORKSPACE/android-kernel
-
-          repo init \
-            -u https://github.com/dopaemon/android_kernel_oneplus_common.git \
-            -b manifest \
-            --depth=1 \
-            --git-lfs
-          repo sync -c --no-clone-bundle --optimized-fetch --prune --force-sync -j$(nproc --all)
-
-          cd $GITHUB_WORKSPACE
-
-          git clone -b master --single-branch --depth=1 https://github.com/dopaemon/Anykernel3.git ./AnyKernel3
+          mkdir -p $GITHUB_WORKSPACE/android-kernel && cd $GITHUB_WORKSPACE/android-kernel
+          repo init --depth=1 --u ${{ github.event.inputs.KERNEL_GIT }} -b manifest
+          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+          git clone -b build --single-branch https://github.com/dopaemon/android_kernel_xiaomi_common.git build
+          rm -rf .git .github .repo common
+          git clone -b ${{ github.event.inputs.CLANG_BRANCH }} --depth=1 --single-branch ${{ github.event.inputs.CLANG_PREBUILT }} prebuilts-master/clang/host/linux-x86/clang-r416183b
+          rm -rf ./build/_setup_env.sh
+          wget -O ./build/_setup_env.sh https://raw.githubusercontent.com/dopaemon/android_kernel_xiaomi_common/refs/heads/master/.github/scripts/_setup_env.sh
+          chmod +x ./build/_setup_env.sh
+          git clone -b ${{ github.event.inputs.KERNEL_BRANCH }} --recurse-submodules -j$(nproc --all) --depth=1 --single-branch ${{ github.event.inputs.KERNEL_GIT }} ./common
+          git clone -b lineage-22.2 --single-branch --depth=1 https://github.com/LineageOS/android_kernel_oneplus_sm8650-modules.git sm8650-modules
+          git clone -b lineage-22.2 --single-branch --depth=1 https://github.com/LineageOS/android_kernel_oneplus_sm8650-devicetrees.git sm8650-devicetrees
+          git clone -b ${{ github.event.inputs.ANYKERNEL_BRANCH }} --depth=1 --single-branch ${{ github.event.inputs.ANYKERNEL_GIT }} ./AnyKernel3
           rm -rf ./AnyKernel3/.git
+
+      - name: Build Selected Devices KSU
+        if: github.event.inputs.BUILD_TARGET == 'KSU' || github.event.inputs.BUILD_TARGET == 'Both'
+        run: |
+          set -e
+          DEVICE="${{ matrix.device }}"
+
+          cd $GITHUB_WORKSPACE/android-kernel
+          cd ./common/
+          git reset --hard HEAD
+          rm -rf $GITHUB_WORKSPACE/android-kernel/out
+
+          if [ "$DEVICE" != "gki" ]; then
+             cat arch/arm64/configs/vendor/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
+             cat arch/arm64/configs/vendor/oplus/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
+          fi
+
+          cd ../
+          CC='ccache' LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh -j$(nproc --all)
+
+          # Make flashable ZIP
+          ZIP_NAME="DoraCore-${DEVICE}-KSU-6.1-A14-${BUILD_DATE}.zip"
+          cd $GITHUB_WORKSPACE/android-kernel/AnyKernel3
+          cp -f $GITHUB_WORKSPACE/android-kernel/out/android14-6.1/dist/Image ./Image
+          zip -r9 "$ZIP_NAME" *
+          mv "$ZIP_NAME" $GITHUB_WORKSPACE/
 
       - name: Build Selected Devices NonKSU
         if: github.event.inputs.BUILD_TARGET == 'NonKSU' || github.event.inputs.BUILD_TARGET == 'Both'
         run: |
-          set -xve
+          set -e
           DEVICE="${{ matrix.device }}"
 
-          export CC="clang"
-          export CLANG_TRIPLE="aarch64-linux-gnu-"
-          export LDFLAGS="-fuse-ld=lld"
-
-          export CPUD="pineapple"
-          export ENABLE_LTO="false"
-          export ENABLE_POLLY="false"
-          export ENABLE_O3="false"
-
           cd $GITHUB_WORKSPACE/android-kernel
-          export OLD_DIR="$(pwd)"
-          export KERNEL_WORKSPACE="$OLD_DIR/kernel_platform"
+          cd ./common/
+          git reset --hard HEAD
+          rm -rf $GITHUB_WORKSPACE/android-kernel/out
+          echo "CONFIG_KSU=n" >> arch/arm64/configs/gki_defconfig
 
-          BAZEL_ARGS=""
-          [ "$ENABLE_O3" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-O3 --copt=-Wno-error"
-          [ "$ENABLE_LTO" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-flto --linkopt=-flto"
-          [ "$ENABLE_POLLY" = "true" ] && BAZEL_ARGS="$BAZEL_ARGS --copt=-mllvm --copt=-polly --copt=-mllvm --copt=-polly-vectorizer=stripmine"
+          if [ "$DEVICE" != "gki" ]; then
+             cat arch/arm64/configs/vendor/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
+             cat arch/arm64/configs/vendor/oplus/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
+          fi
 
-          rm -f "$KERNEL_WORKSPACE/common/android/abi_gki_protected_exports_*" || echo "No protected exports!"
-          rm -f "$KERNEL_WORKSPACE/msm-kernel/android/abi_gki_protected_exports_*" || echo "No protected exports!"
-          sed -i 's/ -dirty//g' "$KERNEL_WORKSPACE/build/kernel/kleaf/workspace_status_stamp.py"
-
-          cd "$KERNEL_WORKSPACE" || exit 1
-          find . -type d > "$OLD_DIR/kernel_directory_structure.txt"
-
-          cd "$KERNEL_WORKSPACE" || exit 1
-          rm common/android/abi_gki_protected_exports_*
-
-          export OPLUS_FEATURES="OPLUS_FEATURE_BSP_DRV_INJECT_TEST=1"
-
-          cd "$OLD_DIR" || exit 1
-          ./kernel_platform/build_with_bazel.py -t "${CPUD}" gki \
-              --config=stamp \
-              --linkopt="-fuse-ld=lld" \
-              --verbose_failures \
-              $BAZEL_ARGS
-
-          KERNEL_VERSION=$(cat "$KERNEL_WORKSPACE/out/msm-kernel-${CPUD}-gki/dist/version.txt" 2>/dev/null || echo "6.1")
-          cp "$KERNEL_WORKSPACE/out/msm-kernel-${CPUD}-gki/dist/Image" $GITHUB_WORKSPACE/AnyKernel3/
+          cd ../
+          CC='ccache' LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh -j$(nproc --all)
 
           # Make flashable ZIP
-          ZIP_NAME="DoraCore-${DEVICE}-6.1-A14-${BUILD_DATE}.zip"
-          cd $GITHUB_WORKSPACE/AnyKernel3
+          ZIP_NAME="DoraCore-${DEVICE}-NonKSU-6.1-A14-${BUILD_DATE}.zip"
+          cd $GITHUB_WORKSPACE/android-kernel/AnyKernel3
+          cp -f $GITHUB_WORKSPACE/android-kernel/out/android14-6.1/dist/Image ./Image
           zip -r9 "$ZIP_NAME" *
           mv "$ZIP_NAME" $GITHUB_WORKSPACE/
 
