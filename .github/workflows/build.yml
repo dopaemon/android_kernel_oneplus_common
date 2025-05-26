@@ -177,7 +177,6 @@ jobs:
 
           if [ "$DEVICE" != "gki" ]; then
              cat arch/arm64/configs/vendor/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
-             cat arch/arm64/configs/vendor/oplus/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
           fi
 
           cd ../
@@ -204,7 +203,6 @@ jobs:
 
           if [ "$DEVICE" != "gki" ]; then
              cat arch/arm64/configs/vendor/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
-             cat arch/arm64/configs/vendor/oplus/pineapple_GKI.config >> arch/arm64/configs/gki_defconfig
           fi
 
           cd ../
