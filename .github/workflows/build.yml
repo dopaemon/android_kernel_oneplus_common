@@ -203,6 +203,7 @@ jobs:
           ./kernel_platform/build_with_bazel.py -t "${CPUD}" gki \
               --config=stamp \
               --linkopt="-fuse-ld=lld" \
+              --verbose_failures \
               $BAZEL_ARGS
 
           KERNEL_VERSION=$(cat "$KERNEL_WORKSPACE/out/msm-kernel-${CPUD}-gki/dist/version.txt" 2>/dev/null || echo "6.1")
