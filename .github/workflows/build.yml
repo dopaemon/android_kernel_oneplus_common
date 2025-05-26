@@ -35,14 +35,6 @@ on:
         - NonKSU
         - KSU
         - Both
-      ANYKERNEL_GIT:
-        description: 'AnyKernel3 Git'
-        required: true
-        default: 'https://github.com/dopaemon/Anykernel3.git'
-      ANYKERNEL_BRANCH:
-        description: 'AnyKernel3 Branch'
-        required: true
-        default: 'master'
       RELEASE:
         description: 'Status Release'
         required: true
@@ -168,11 +160,11 @@ jobs:
 
           cd $GITHUB_WORKSPACE
 
-          git clone -b ${{ github.event.inputs.ANYKERNEL_BRANCH }} --depth=1 --single-branch ${{ github.event.inputs.ANYKERNEL_GIT }} ./AnyKernel3
+          git clone -b master --single-branch --depth=1 https://github.com/dopaemon/Anykernel3.git ./AnyKernel3
           rm -rf ./AnyKernel3/.git
 
-      - name: Build Selected Devices KSU
-        if: github.event.inputs.BUILD_TARGET == 'KSU' || github.event.inputs.BUILD_TARGET == 'Both'
+      - name: Build Selected Devices NonKSU
+        if: github.event.inputs.BUILD_TARGET == 'NonKSU' || github.event.inputs.BUILD_TARGET == 'Both'
         run: |
           set -xve
           DEVICE="${{ matrix.device }}"
@@ -185,10 +177,6 @@ jobs:
           export ENABLE_LTO="false"
           export ENABLE_POLLY="false"
           export ENABLE_O3="false"
-
-          export ANDROID_VERSION="android14"
-          export KERNEL_VERSION="6.1"
-          export SUSFS_VERSION="1.5.5"
 
           cd $GITHUB_WORKSPACE/android-kernel
           export OLD_DIR="$(pwd)"
@@ -207,38 +195,6 @@ jobs:
           find . -type d > "$OLD_DIR/kernel_directory_structure.txt"
 
           cd "$KERNEL_WORKSPACE" || exit 1
-          curl -LSs "https://raw.githubusercontent.com/5ec1cff/KernelSU/refs/heads/main/kernel/setup.sh" | bash -
-          cd KernelSU || exit 1
-          git revert -m 1 "$(git log --grep="remove devpts hook" --pretty=format:"%H")" -n
-          KSU_VERSION=$(expr "$(git rev-list --count HEAD)" + 10200)
-          sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
-
-          cd "$OLD_DIR" || exit 1
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "gki-${ANDROID_VERSION}-${KERNEL_VERSION}" --depth 1
-          git clone https://github.com/TanakaLun/kernel_patches4mksu --depth 1
-          cd "$KERNEL_WORKSPACE" || exit 1
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
-          cp ../kernel_patches4mksu/mksu/mksu_susfs.patch ./KernelSU/
-          cp ../kernel_patches4mksu/mksu/fix.patch ./KernelSU/
-          cp ../kernel_patches4mksu/mksu/vfs_fix.patch ./KernelSU/
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch ./common/
-          cp -r ../susfs4ksu/kernel_patches/fs/* ./common/fs/
-          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-
-          cd KernelSU || exit 1
-          patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
-          patch -p1 --forward < mksu_susfs.patch || true
-          patch -p1 --forward < fix.patch || true
-          patch -p1 --forward < vfs_fix.patch || true
-          cd ../common || exit 1
-          patch -s -p1 < 50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch || true
-
-          curl -o 001-lz4.patch https://raw.githubusercontent.com/ferstar/kernel_manifest/realme/sm8650/patches/001-lz4.patch
-          patch -p1 < 001-lz4.patch || true
-          curl -o 002-zstd.patch https://raw.githubusercontent.com/ferstar/kernel_manifest/realme/sm8650/patches/002-zstd.patch
-          patch -p1 < 002-zstd.patch || true
-
-          cd "$KERNEL_WORKSPACE" || exit 1
           rm common/android/abi_gki_protected_exports_*
 
           export OPLUS_FEATURES="OPLUS_FEATURE_BSP_DRV_INJECT_TEST=1"
@@ -253,7 +209,7 @@ jobs:
           cp "$KERNEL_WORKSPACE/out/msm-kernel-${CPUD}-gki/dist/Image" $GITHUB_WORKSPACE/AnyKernel3/
 
           # Make flashable ZIP
-          ZIP_NAME="DoraCore-${DEVICE}-KSU-6.1-A14-${BUILD_DATE}.zip"
+          ZIP_NAME="DoraCore-${DEVICE}-6.1-A14-${BUILD_DATE}.zip"
           cd $GITHUB_WORKSPACE/AnyKernel3
           zip -r9 "$ZIP_NAME" *
           mv "$ZIP_NAME" $GITHUB_WORKSPACE/
